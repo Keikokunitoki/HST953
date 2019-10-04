@@ -1,0 +1,24 @@
+###Loading libraries and Big Query project
+libraries
+* Plotly: Graphing library to make interactive web-based version and/or create custom web-based visualizations directly from R.
+
+```{r}
+list.of.packages <- c("bigrquery","plotly","scales","RColorBrewer","data.table","dplyr","knitr","corrplot","Hmisc","stats")
+new.packages<-list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+if(length(new.packages)>0)
+{install.packages(new.packages)}
+
+library(bigrquery)
+library(plotly)
+library(scales)
+library(RColorBrewer)
+library(data.table)
+library(dplyr)
+library(knitr)
+library(corrplot)
+library(Hmisc)
+library(stats)
+
+project_HST = "hst-953-2019"
+```
