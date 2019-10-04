@@ -22,3 +22,50 @@ library(stats)
 
 project_HST = "hst-953-2019"
 ```
+
+
+```{r}
+patientunitstayid <-2504725
+df_vitals_eicu<-query_exec(paste("SELECT * FROM `physionet-data.eicu_crd_derived.pivoted_vital` WHERE
+chartoffset <= 1440 AND patientunitstayid =", patientunitstayid,
+"ORDER BY chartoffset") 
+              , project = project_HST,use_legacy_sql = F )
+```
+
+```{r}
+summary(df_vitals_eicu)
+```
+
+```{r}
+bpdatatobeplotted<-df_vitals_eicu%>%
+  select(chartoffset,nibp_systolic,nibp_diastolic,nibp_mean,ibp_systolic,ibp_diastolic,ibp_mean)
+
+x <- list(
+  title = "Time from ICU admission (hours)"
+  ,titlefont = 'Ubuntu'
+)
+y <- list(
+  title = "Value (mmHg)"
+  ,titlefont = 'Ubuntu'
+)
+
+bp <- plot_ly(data = bpdatatobeplotted, 
+             x = ~chartoffset/60 
+            ,marker=list(size=12, opacity=0.6)
+            )%>%
+ add_trace( y = ~nibp_systolic,name='nibp_systolic') %>%
+ add_trace( y = ~nibp_diastolic,name='nibp_diastolic') %>%
+ add_trace(y = ~nibp_mean,name='nibp_mean') %>%
+ add_trace(y = ~ibp_systolic,name='ibp_systolic') %>%
+ add_trace(y = ~ibp_diastolic,name='ibp_diastolic') %>%
+ add_trace(y = ~ibp_mean,name='ibp_mean') %>%
+
+  layout(
+    title = "Non-Invasive Blood Pressure in eICU in the first 24h of ICU admission",
+    xaxis = x, yaxis = y
+    )
+
+
+bp
+```
+
