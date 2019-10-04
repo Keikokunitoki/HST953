@@ -1,4 +1,4 @@
-###Loading libraries and Big Query project
+### Loading libraries and Big Query project
 libraries
 * Plotly: Graphing library to make interactive web-based version and/or create custom web-based visualizations directly from R.
 
