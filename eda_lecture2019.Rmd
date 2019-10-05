@@ -1,0 +1,917 @@
+---
+title: "Exploratory Data Analysis (EDA)"
+author: "J.D. Raffa"
+date: "October 4, 2019"
+output: 
+  beamer_presentation: 
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 9
+    includes:
+      in_header: preamble.tex
+    keep_tex: yes
+---
+
+# Outline
+
+1. What is EDA?
+2. Where is EDA useful?
+    a. Assessing Data Quality
+    b. Sanity Checks
+    c. Finding Relationships between Variables
+    d. Integrated into your confirmatory analysis
+3. What tools are available?
+
+Note: I probably won't due EDA justice in this 60 min lecture.  
+It should be something that you work at and will improve as you gain more experience.
+
+
+# What is EDA?
+
+\begincols
+  \begincol{.48\textwidth}
+
+\includegraphics{John_Tukey.jpg} \endcol \begincol{.48\textwidth}
+
+\begin{itemize}
+\item
+  Mainly conceptualized by John Tukey to supplement confirmatory
+  analysis, which had dominated statistics in the 20th century.
+\item
+  \emph{``It is important to understand what you CAN DO, before you
+  learn to measure how WELL you seem to have DONE it.''} - J. W. Tukey
+  (1977)
+\item
+  i.e., spitting out a p-value is often premature, unless you've looked
+  at the data first.
+\end{itemize}
+
+  \endcol
+  \endcols
+
+\pause
+
+\begin{itemize}
+\tightlist
+\item
+  Non-technical definition:\emph{``Looking at the data to see what it
+  seems to say.''}
+\end{itemize}
+
+
+----
+
+## Tukey's EDA (1977) Table of Contents
+
+\begincols
+  \begincol{.48\textwidth}
+
+![EDA Book](content.jpeg)
+\endcol
+\begincol{.48\textwidth}
+
+1. Stem-and-leaf plots
+2. 5-number summaries/boxplots
+3. Transformations
+4. Comparisons
+5. Effective Plotting of Quantitative Variables
+6. Transformations (again)
+7. Smoothing
+
+$\ldots$
+
+
+  \endcol
+\endcols
+
+
+
+----
+
+*"Today, exploratory and confirmatory (analysis) -- can -- and should -- proceed side by side."*
+-- J. W. Tukey (1977)
+
+\begin{figure}
+\begin{center}
+\begin{tikzpicture}
+  \path (0,9)    node(eda) [circle, draw] {Exploratory}
+
+
+		(9,9)    node(cda) [rectangle, draw,text width=2.4cm] {Confirmatory}
+		;
+
+\draw[thick,black, ->] (eda) to[bend right=10] node[below, pos=0.5] {Suggestions for (Improved) Analysis} (cda);
+
+  \draw[thick, black, ->] (cda) to[bend right=10]  node[above, pos=0.5] {Suggestions for (Improved) Analysis} (eda);
+
+  \end{tikzpicture}\end{center}
+	\caption{Flow diagram of complimentary nature of EDA and CDA}
+	\label{f:ChooseAnAnalysis}
+\end{figure}
+
+\pause
+
+- One is not intended to replace or be superior to the other.
+- Includes Data Visualization, but is _not_ only Data Visualization.
+
+----
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE,message=FALSE,cache=FALSE)
+
+library(RPostgreSQL) 
+ora_p <- readLines("~/data2/EICU/.ora_")
+
+
+m <- dbDriver("PostgreSQL")
+
+con <- dbConnect(m, user="jraffa", password=ora_p, dbname="eicu",host="localhost",port=5647)
+library(plyr)
+library(dplyr); library(RPostgreSQL); library (ggplot2); library(Hmisc); library(plotly); library(gridExtra); library(tidyr)
+
+pg_src <- src_postgres(dbname = "eicu", host = "127.0.0.1", port = 5647, user = "jraffa", password = ora_p,options="-c search_path=eicu_crd")
+
+patient_tbl <- tbl(pg_src,"patient")
+labs_tbl <- tbl(pg_src,"lab") 
+vitalsp_tbl <- tbl(pg_src,"vitalperiodic")
+vitalsa_tbl <- tbl(pg_src,"vitalaperiodic")
+apache_tbl <- tbl(pg_src,"apachepatientresult") 
+
+
+```
+
+# EDA: Where you might find it useful?
+
+- EDA -- I use it a lot when:
+    - vetting the data quality or data extraction assumptions.
+    - finding relationships between variables.
+
+# Assessing Data Quality
+
+- Data extraction is often easy when compared vetting the data.
+- Once data has been pulled, data quality should be assessed:
+    - Is it complete?
+    - Does it mean the same thing in all instances?
+    - Are your assumptions about extraction correct?
+    - EDA and extraction need to be integrated.
+        - How does the data need to be processed to make it usable?
+
+\pause
+
+## In MIMIC:
+
+- Differences over time.
+- Differences between CareVue/Metavision.
+
+
+
+## In EICU:
+
+- Are things conceptually the same across hospitals?
+- Does "missing" mean: not done or not in eICU-CRD?
+
+
+----
+
+
+Example: Project requires lactate lab measurements for a project using EICU.  
+
+- Serum Lactate is a lab, so we look at the labs table and identify some lactate observations.
+
+
+
+We extract all lactate measurements, and want to assess the data quality.
+
+```{r}
+lact_all <- labs_tbl %>% 
+  filter(labname=="lactate") %>% 
+  inner_join(patient_tbl %>% 
+               select(patientunitstayid,hospitalid,unitadmityear,unittype,apacheadmissiondx),by="patientunitstayid") %>%
+  left_join(apache_tbl %>% filter(apacheversion=="IVa") %>% select(patientunitstayid,apachescore)) %>%
+  collect(n=Inf)
+lact_all %>% select(patientunitstayid,labresultoffset,labname,labresult,labresulttext) %>% head() %>% knitr::kable(caption="Example Lactate Data")
+```
+
+
+----
+
+
+1. What exactly have we extracted?
+    a. Are there any apparent anamolies in the data?
+    b. Does the data look as expected?
+    c. What exactly do we have?
+    
+2. Is 'lactate' conceptually the same across hospitals?
+    a. Do the values differ vastly?
+    b. Do the frequencies/proportions differ widely?
+
+
+----
+
+_Version v0.1:  Density Estimate_
+
+```{r,fig.cap="Lactate Density Estimate"}
+
+ggplot(lact_all,aes(labresult)) + geom_density() + xlab("Lactate Result") + ggtitle(paste0("n=", nrow(lact_all), " lacate results "))
+
+```
+
+----
+
+**Q1: Are the really big values legitimate?**
+
+- First, understand these are time series / longitudinal data.
+
+```{r,fig.height=3,fig.cap="Spaghetti Plot of Lacate Values over the first 48 hours of the ICU Admission"}
+lact_all %>% filter(labresultoffset>=0 & labresultoffset<=2880)%>%  ggplot(aes(labresultoffset/1440,labresult,group=patientunitstayid)) + geom_line(alpha=0.5) + ggtitle("First 48h of Lactates") + xlab("Days Since ICU Admission") + ylab("Lactate Level")
+```
+
+
+----
+
+*Have a look at some of the high levels*
+
+
+```{r, fig.width=4,fig.height=2.5,fig.cap="Patient with high lactate levels"}
+lact_all %>% filter(patientunitstayid==183753) %>% select(labresultoffset,labname,labresult) %>%ggplot(aes(labresultoffset/1440,labresult)) + geom_line() + xlab("Days Since ICU Admission") + ylab("Lactate Level")
+```
+
+\footnotesize {
+Other info: 64 y.o. woman, APACHE Admission Dx: `Encephalopathy, hepatic`, Readmission in the same Hospital Admission for `Sepsis, GI`.
+Started in SICU, readmitted to Neuro ICU.
+Died in the Unit.
+}
+
+
+----
+
+What did the trajectory look like in the previous ICU stay?
+
+```{r, fig.width=4,fig.height=2.5,fig.cap="First ICU Stay of the same patient"}
+lact_all %>% filter(patientunitstayid==183752) %>% select(labresultoffset,labname,labresult) %>%ggplot(aes(labresultoffset/1440,labresult)) + geom_line() + xlab("Days Since ICU Admission") + ylab("Lactate Level")
+```
+
+Patient had high lactates in both admission.  Why is there a break in the time series?
+
+----
+
+
+```{r}
+
+lact_all %>% filter(patientunitstayid==183752) %>% select(labresultoffset,labname,labresult,labresulttext) %>% arrange(labresultoffset) %>% tail(.,4) %>% knitr::kable(caption="Last few lactate observations for this patient\'s first stay")
+```
+
+Using `labresult` may miss some lactate tests!
+
+----
+
+How many?
+
+
+```{r}
+lact_all %>% filter(is.na(labresult)) %>% summarise(n=n()) %>% knitr::kable()
+```
+
+In decreasing prevalence, the values observed:
+
+\tiny
+
+```{r}
+names(sort(with(lact_all %>% filter(is.na(labresult)) ,table(labresulttext)),decreasing = TRUE))
+```
+
+\pause
+
+\normalsize
+
+In most cases, it seems to be related to the test's level of quantification, with low or high levels censored depending on the lab.
+Before using lactate -- one needs to incorporate these values.
+
+
+----
+
+**Q2: Does the data look as expected?**
+
+- Ask a question you know the answer to, in order to assess validity.
+
+Look at serum lactate by sepsis admission diagnosis -- would expect sepsis patients to have higher levels (on average).
+
+---
+
+```{r,fig.cap="Boxplot of Lactate Levels by Sepsis Admission Dx"}
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>%
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% 
+  ggplot(aes(sepsis,labresult)) + geom_boxplot() + scale_y_log10()
+
+```
+
+----
+
+```{r}
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>%
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% group_by(sepsis) %>% summarise(n=n(),median(labresult,na.rm=T)) %>% knitr::kable()
+```
+
+
+
+----
+
+```{r}
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>%
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% group_by(sepsis) %>% summarise(mean(labresult>=4,na.rm=T)) %>% knitr::kable()
+```
+
+Seems like a fairly small difference.  May not be too surprising:
+
+- Diagnosis made during the first 24hrs; Lactate can occur over the entire admission.
+
+Hypothesis: If we restrict to lactates during the first 24hr, the difference should increase.
+
+----
+
+The first lactate after that admission occurring in the first 24 hours:
+
+```{r}
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>% filter(labresultoffset<=1440 & labresultoffset>=0) %>% 
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% 
+  group_by(patientunitstayid,sepsis) %>% arrange(labresultoffset) %>% slice(1) %>%
+  ggplot(aes(sepsis,labresult)) + geom_boxplot() + scale_y_log10()
+```
+
+----
+
+```{r}
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>% filter(labresultoffset<=1440 & labresultoffset>=0) %>% 
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% 
+  group_by(patientunitstayid,sepsis) %>% arrange(labresultoffset) %>% slice(1) %>% group_by(sepsis) %>% summarise(n=n(),median(labresult,na.rm=T))  %>% knitr::kable(caption="Median Lactate of earliest measurement in the first 24h of the ICU Stay by Sepsis Admission Dx")
+```
+
+----
+
+Maybe, it's the extreme values that will show it better?
+
+\pause
+
+```{r}
+
+lact_all %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>% filter(labresultoffset<=1440 & labresultoffset>=0) %>% 
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% 
+  group_by(patientunitstayid,sepsis) %>% summarise(n=n(),max_sepsis=max(labresult,na.rm=TRUE)) %>% group_by(sepsis) %>% summarise(n=n(),median(max_sepsis,na.rm=T))  %>% knitr::kable(caption="Max Lactate over the first 24h of the ICU Stay by Sepsis Admission Dx")
+
+```
+
+\pause
+
+- What is going on?
+
+----
+
+
+```{r}
+lact_all %>% select(-hospitalid) %>% mutate(apacheadmissiondx=ifelse(apacheadmissiondx=="",NA,apacheadmissiondx)) %>% filter(labresultoffset<=1440 & labresultoffset>=0) %>% full_join(patient_tbl%>% select(patientunitstayid,hospitalid),by="patientunitstayid",copy=TRUE) %>% 
+  mutate(sepsis = ifelse(grepl("sepsis", apacheadmissiondx,ignore.case = TRUE),"Sepsis","Not Sepsis")) %>% 
+  group_by(patientunitstayid,sepsis,hospitalid) %>% summarise(n=n(),max_sepsis=max(labresult,na.rm=TRUE)) %>% mutate(is_na=is.na(max_sepsis) | is.infinite(max_sepsis)) %>% group_by(sepsis,is_na) %>% summarise(n=n(),median(max_sepsis,na.rm=T))  %>% mutate(`median(max_sepsis, na.rm = T)`=ifelse(is.finite(`median(max_sepsis, na.rm = T)`),`median(max_sepsis, na.rm = T)`,"--"))%>% knitr::kable(caption="Median Max Lactate Levels in Septic and Non-Septic Patients with the number of patients without a lactate leve on the first day of the ICU stay")
+```
+
+- Careful handling of missing data is essential.  
+- Not doing so, can lead to false conclusions: ~~Septic and non-septic patients have similar serum lactate levels on the first day.~~
+- If the focus of the study is lactate, what can you do:
+    1. Restrict the population to patients with a sepsis diagnosis.
+    2. Make an assumption about missing lactate levels and/or impute.
+
+----
+
+2. Does missing all lactate tests mean no tests were done?
+
+- Why would this matter?
+\pause
+
+- No test often is assumed to mean "~Normal"
+
+
+----
+
+```{r,fig.caption="Distribution of the proportion of patients with a lactate test within each hospital"}
+
+lact_by_hosp <- labs_tbl %>% 
+  filter(labname=="lactate") %>% 
+  select(patientunitstayid,labname) %>% 
+  full_join(patient_tbl %>% 
+               select(patientunitstayid,hospitalid,unitadmityear),by="patientunitstayid") %>%
+  mutate(m=is.na(labname))  %>%
+  group_by(patientunitstayid,hospitalid) %>%
+  summarise(n=sum(if_else(m,0,1))) %>%
+  group_by(hospitalid) %>%
+  summarise(N=n(),mn_lact_tests=mean(n),prop_with_lactate=mean(if_else(n>0,1,0))) %>% collect(n=Inf)
+
+ggplot(lact_by_hosp,aes(prop_with_lactate)) + geom_histogram() + xlab("Proportion of Patients In Hospital with a Lactate Test")
+```
+
+----
+
+```{r,fig.cap="Distribution of the proportion of patients with any lab test within each hospital"}
+
+test_by_hosp <- labs_tbl %>% 
+  select(patientunitstayid,labname) %>% 
+  full_join(patient_tbl %>% 
+               select(patientunitstayid,hospitalid,unitadmityear),by="patientunitstayid") %>%
+  mutate(m=is.na(labname))  %>%
+  group_by(patientunitstayid,hospitalid) %>%
+  summarise(n=sum(if_else(m,0,1))) %>%
+  group_by(hospitalid) %>%
+  summarise(N=n(),mn_tests=mean(n),prop_with_test=mean(if_else(n>0,1,0))) %>% collect(n=Inf)
+
+ggplot(test_by_hosp,aes(prop_with_test)) + geom_histogram() + xlab("Proportion of Patients In Hospital with Any Lab Test")
+```
+
+
+----
+
+```{r}
+
+test_by_hosp %>% filter(prop_with_test<0.1) %>% knitr::kable(caption = "Hospitals with fewer than 10% of their Patients Having Tests")
+
+```
+
+----
+
+```{r,fig.cap="Scatterplot of Hospital ID vs. Proportion of Patients within each Hospital with a lactate test."}
+ggplot(lact_by_hosp,aes(hospitalid,prop_with_lactate,col=prop_with_lactate==0)) + geom_point(aes(size=N)) + xlab("Hospital ID") + ylab("Proportion of Patients with a Lactate Test")
+
+```
+
+----
+
+## A Different Example
+
+\includegraphics{corrupt_plot.png}
+
+----
+
+## Hypothesis:
+
+- The absence or near-absence of a specific type of data from within a single hospital, likely indicates the lack of collection of this type of data at the hospital.
+
+- What evidence could you use to support/refute this hypothesis?
+    - Consistency over time.
+    - Other sanity checks -- patients which would almost always require lactate.
+
+
+----
+
+```{r,fig.cap="Distribution of the proportion of patients with a lactate test within each hospital stratified by discharge year"}
+lact_by_hosp_year <- labs_tbl %>% 
+  filter(labname=="lactate") %>% 
+  select(patientunitstayid,labname) %>% 
+  full_join(patient_tbl %>% 
+               select(patientunitstayid,hospitalid,hospitaldischargeyear),by="patientunitstayid") %>%
+  mutate(m=is.na(labname))  %>%
+  group_by(patientunitstayid,hospitalid,hospitaldischargeyear) %>%
+  summarise(n=sum(if_else(m,0,1))) %>%
+  group_by(hospitalid,hospitaldischargeyear) %>%
+  summarise(N=n(),mn_lact_tests=mean(n),prop_with_lactate=mean(if_else(n>0,1,0))) %>% collect(n=Inf)
+
+ggplot(lact_by_hosp_year,aes(prop_with_lactate)) + geom_histogram() + facet_wrap(~hospitaldischargeyear) + xlab("Proportion of Patients In Hospital with a Lactate Test") + ggtitle("By Hospital Discharge Year")
+
+```
+
+
+----
+
+
+```{r,fig.cap="Proportion of Lactate Tests in 2014 and 2015 in each hospital, Restricted to Hospitals w/ 100+ Admission in each year."}
+ggplot(lact_by_hosp_year  %>% filter(N>100)  %>% ungroup() %>%  select(-mn_lact_tests,-N) %>% spread(hospitaldischargeyear,prop_with_lactate),aes(`2014`,`2015`)) + geom_point() + xlab("Proportion of Patients In Hospital with a Lactate Test, 2014") +  ylab("Proportion of Patients In Hospital with a Lactate Test, 2015")
+```
+
+
+----
+
+
+```{r, fig.cap="Mean number of Lactate Tests in 2014 and 2015 in each Hospital, Restricted to Hospitals w/ 100+ Admission in each year."}
+
+ggplot(lact_by_hosp_year %>% filter(N>100) %>%  ungroup() %>%  select(-prop_with_lactate,-N) %>% spread(hospitaldischargeyear,mn_lact_tests),aes(`2014`,`2015`)) + geom_point() +xlab("Mean Number of Lactate Tests per patient by Hospital, 2014") +  ylab("Mean Number of Lactate Tests per patient by Hospital, 2015")
+
+
+```
+
+----
+
+- What else would you look at to establish if these patients had no lactate tests, or if these tests were just not collected?
+    \pause
+    - All lab results missing.
+    - Diagnoses?
+    - Type of ICU?
+    - Length of Stay
+
+\pause 
+
+- The `labs` table is generally fairly complete (i.e., most patients have some tests)
+- Others are not.
+
+----
+
+Example: Completeness of `medications`
+
+```{r,fig.cap="Distribution of the proportion of patients with a medication order within each hospital"}
+meds_tbl <- tbl(pg_src,"medication")
+meds_tbl %>% full_join(patient_tbl%>% select(patientunitstayid,hospitalid,hospitaldischargeyear),"patientunitstayid") %>% mutate(no_meds=is.na(medicationid)) %>%select(patientunitstayid,hospitalid,hospitaldischargeyear,no_meds) %>% collect(n=Inf) %>%  group_by(patientunitstayid,hospitalid,hospitaldischargeyear) %>%  summarise(N=sum(!no_meds)) %>% group_by(hospitalid) %>% summarise(n=n(),prop=mean(N>0)) %>% ggplot(aes(prop)) + geom_histogram()
+
+```
+
+----
+
+```{r,fig.cap="Scatterplot of the Proportion of patients with a medication order in each of 2014 and 2015"}
+meds_tbl %>% full_join(patient_tbl%>% select(patientunitstayid,hospitalid,hospitaldischargeyear),"patientunitstayid") %>% mutate(no_meds=is.na(medicationid)) %>%select(patientunitstayid,hospitalid,hospitaldischargeyear,no_meds) %>% collect(n=Inf) %>%  group_by(patientunitstayid,hospitalid,hospitaldischargeyear) %>%  summarise(N=sum(!no_meds)) %>% group_by(hospitalid,hospitaldischargeyear) %>% summarise(n=n(),prop=mean(N>0)) %>% select(-n) %>% spread(hospitaldischargeyear,prop) %>% ggplot(aes(`2014`,`2015`)) + geom_point() + xlab("2014, Proportion of Patients in Hospital with a Medication Ordered")+ ylab("2015, Proportion of Patients in Hospital with a Medication Ordered")
+```
+
+----
+
+**What have we learned about lactates?**
+
+1. There are some extreme values, _but_ they seem like they are real values.
+2. Using `labresult` alone will ignore observations above and below the levels of quantification of the lab's lactate test.
+3. Almost all patients with a sepsis admission diagnosis have a lactate within the first 24 hours.
+4. Lactate is less frequently tested if you're not a patient with a sepsis admission diagnosis.
+5. The `labs` table tends to be fairly complete.  There is reason to believe we have most of the lactate levels, and there are not hospitals lacking them.
+
+- *A quick inspection of the data, has led to a bunch of improvements that will improve the study and we would be unlikely to find later on.*
+- If lactate with a key variable in our analysis ignoring any of these aspects could make the results invalid.
+
+
+<!--
+
+----
+
+```{r}
+#tmp <- labs_tbl %>% group_by(patientunitstayid) %>% summarise(n=n()) %>% full_join(patient_tbl %>% select(patientunitstayid,hospitalid,unittype),by="patientunitstayid") %>% group_by(hospitalid) %>% summarise(n=sum(if_else(is.na(n),0,n)))
+
+
+```
+
+# A Vital Signs Example
+
+```{r,eval=FALSE}
+hr_by_hosp <- vitalsp_tbl %>% 
+  filter(!is.na(heartrate)) %>%
+  select(patientunitstayid,observationoffset,heartrate) %>%
+  full_join(patient_tbl %>% select(patientunitstayid,hospitalid),by="patientunitstayid") %>%
+  mutate(m=is.na(heartrate)) %>%
+  group_by(patientunitstayid,hospitalid) %>% 
+  summarise(n=sum(if_else(m,0,1))) %>%
+  group_by(hospitalid) %>% 
+  summarise(N=n(),hr_measures=mean(n),prop_with_hr=mean(if_else(n>0,1,0))) %>% collect(n=Inf)
+
+  
+ggplot(hr_by_hosp,aes(hr_measures,fill=hr_measures==0)) + geom_histogram() + xlab("Mean Number of HR Measurements per Patient by Hospital")
+```
+
+----
+
+```{r,eval=FALSE}
+ggplot(hr_by_hosp,aes(prop_with_hr,fill=prop_with_hr==0)) + geom_histogram() + xlab("Proportion of Patients with HR Measurements by Hospital")
+
+```
+
+----
+
+```{r,eval=FALSE}
+hr_interval_by_hosp <- vitalsp_tbl %>% 
+  filter(!is.na(heartrate)) %>%
+  select(patientunitstayid,observationoffset,heartrate) %>%
+  inner_join(patient_tbl %>% select(patientunitstayid,hospitalid),by="patientunitstayid") %>%
+  group_by(patientunitstayid) %>%
+  arrange(observationoffset) %>% 
+  mutate(t_interval=observationoffset - lag(observationoffset)) %>%
+  group_by(hospitalid) %>% 
+  summarise(N=n(),mean_interval=mean(t_interval)) %>% collect(n=Inf)
+
+  
+
+ggplot(hr_interval_by_hosp,aes(mean_interval)) + geom_histogram() + xlab("Mean Interval between HR Measurements (min) by Hospital")
+
+```
+
+----
+
+This isn't always so uniform, e.g., Non-Invasive Mean BP:
+
+
+```{r,eval=FALSE}
+ni_meanbp_interval <- vitalsa_tbl %>% 
+  filter(!is.na(noninvasivemean)) %>%
+  select(patientunitstayid,observationoffset,noninvasivemean) %>%
+  inner_join(patient_tbl %>% select(patientunitstayid,hospitalid),by="patientunitstayid") %>%
+  group_by(patientunitstayid) %>%
+  arrange(observationoffset) %>% 
+  mutate(t_interval=observationoffset - lag(observationoffset)) %>%
+  group_by(hospitalid) %>% 
+  summarise(N=n(),mean_interval=mean(t_interval)) %>% collect(n=Inf)
+
+ggplot(ni_meanbp_interval,aes(mean_interval)) + geom_histogram()  
+
+#ni_meanbp_interval %>% filter(mean_interval<5) 
+
+
+```
+
+----
+  
+And it seems legitimate:
+
+\tiny
+
+```{r,eval=FALSE}
+ni_meanbp_interval_hosp_subset <- vitalsa_tbl %>% 
+  filter(!is.na(noninvasivemean)) %>%
+  select(patientunitstayid,observationoffset,noninvasivemean) %>%
+  inner_join(patient_tbl %>% filter(hospitalid %in% c(414,84)) %>% select(patientunitstayid,hospitalid),by="patientunitstayid") %>%
+  filter(patientunitstayid==297859) %>% group_by(patientunitstayid) %>%
+  arrange(observationoffset) %>% collect(n=Inf)
+
+ni_meanbp_interval_hosp_subset %>% head(.,7) %>%   knitr::kable()
+
+ni_meanbp_interval_hosp_subset %>% tail() %>%  knitr::kable()
+
+
+```
+\pause
+
+\normalsize
+
+- These variables in EICU can also be charted, which may be less frequent, but doesn't mean they don't exist.
+
+-->
+
+# Relationships between Variables
+
+- Previous Analysis we used:
+    - Density Estimates
+    - Histograms
+    - Scatterplots
+- Other options available:
+    - Boxplots (Categorical vs. Quantitative)
+    - Barbell (Categorical vs. Categorical)
+    - Heatmap
+
+
+----
+
+- Try to demonstrate variation/uncertainty in addition to aggregation/summarization:
+    - Display all the data.
+    - Calculate SD/SE/CIs
+    - Show Rugs
+- Keep as simple as possible, but don't over simplify.
+- The best plots should show you something you don't know, rather than something you already know.
+
+----
+
+Density Estimate Plot
+
+```{r,fig.cap="A density estimate of APACHE-IV scores by hospital mortality status"}
+apache_tbl <- tbl(pg_src,"apachepatientresult") 
+apache_data <- patient_tbl %>% mutate(age=if_else(age=="> 89", "90", age)) %>%  inner_join(apache_tbl %>% filter(apachescore>=0 & apacheversion=="IVa"),by="patientunitstayid") %>% select(age,apachescore,gender,actualhospitalmortality,actualhospitallos,apacheadmissiondx,unittype) %>% collect(n=Inf)
+
+ggplot(apache_data,aes(apachescore,fill=actualhospitalmortality)) + geom_density(alpha=0.3)
+
+    
+```
+
+
+----
+
+Boxplot
+
+```{r,fig.cap="A boxplot of APACHE-IV scores by hospital mortality status"}
+
+ggplot(apache_data,aes(actualhospitalmortality,apachescore)) + geom_boxplot(alpha=0.3)
+
+
+```
+
+----
+
+Scatterplot (or dotplot)
+
+```{r,fig.cap="A dotplot of APACHE-IV scores by hospital mortality status"}
+
+ggplot(apache_data,aes(actualhospitalmortality,apachescore)) + geom_point(alpha=0.3)
+
+
+```
+
+----
+
+## Histograms
+
+```{r,fig.cap="A histogram of APACHE-IV scores by hospital mortality status (count)"}
+
+ggplot(apache_data,aes(fill=actualhospitalmortality,apachescore)) + geom_histogram(alpha=0.3)
+```
+
+----
+
+
+```{r,fig.cap="A histogram of APACHE-IV scores by hospital mortality status (density)"}
+
+ggplot(apache_data,aes(fill=actualhospitalmortality,apachescore)) + geom_histogram(aes(y=..density..),alpha=0.3)
+```
+
+
+----
+
+```{r,fig.cap="A histogram of APACHE-IV scores by hospital mortality status (density, separated)"}
+ggplot(apache_data,aes(fill=actualhospitalmortality,apachescore)) + geom_histogram(aes(y=..density..),alpha=0.3) + facet_wrap(~actualhospitalmortality)
+```
+
+
+----
+
+Barbell Plot
+
+```{r,fig.cap="A barbell plot of APACHE-IV scores and their mortality rate"}
+
+
+library(MIMICbook)
+apache_data$mort_var <- as.numeric(apache_data$actualhospitalmortality=="EXPIRED")
+apache_data$apache_level <- Hmisc::cut2(apache_data$apachescore,seq(0,200,20))
+plot_prop_by_level(apache_data %>% select(mort_var,apache_level) %>% na.omit,"apache_level","mort_var")
+
+```
+
+- Will use in the Workshop.  `MIMICbook` package on GitHub `devtools::install_github("jraffa/MIMICbook")`
+
+----
+
+Smoothed Plot with Rug
+
+```{r,fig.cap="A smoothed plot of APACHE-IV scores and mortality rate"}
+binomial_smooth <- function(...) {
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), ...,se=TRUE)
+}
+ggplot(apache_data,aes(apachescore,as.numeric(actualhospitalmortality=="EXPIRED"))) + binomial_smooth() + geom_rug() + ylab("Estimated Probability of Death")
+
+```
+
+# Expanding to More than Two Variables
+
+- Want to see how sepsis diagnoses compare to non-sepsis diagnoses in EICU while adjusting for APACHE Score
+- Will match: \*sep\* on apacheadmissiondx
+
+
+----
+
+Density Estimate Plot
+
+```{r,fig.cap="A density estimate stratified by sepsis admission diagnosis"}
+apache_data <- apache_data %>% mutate(sepsis=ifelse(grepl("sep",apacheadmissiondx,ignore.case = TRUE),"SEPSIS","NOT SEPSIS"))
+
+ggplot(apache_data,aes(apachescore,fill=actualhospitalmortality)) + geom_density(alpha=0.3) + facet_wrap(~ sepsis)
+
+    
+```
+
+
+----
+
+Boxplot
+
+```{r,fig.cap="A boxplot stratified by sepsis admission diagnosis"}
+
+ggplot(apache_data,aes(actualhospitalmortality,apachescore)) + geom_boxplot(alpha=0.3) + facet_wrap(~ sepsis)
+
+
+```
+
+----
+
+Dotplot
+
+```{r,fig.cap="A dotplot stratified by sepsis admission diagnosis"}
+
+ggplot(apache_data,aes(actualhospitalmortality,apachescore)) + geom_point(alpha=0.3) + facet_wrap(~ sepsis)
+
+
+```
+
+----
+
+Histogram
+
+```{r,fig.cap="A Histogram stratified by sepsis admission diagnosis"}
+
+ggplot(apache_data,aes(fill=actualhospitalmortality,apachescore)) + geom_histogram(alpha=0.3)  + facet_wrap(~ sepsis)
+
+
+```
+
+----
+
+Barbell Plot
+
+```{r,fig.cap="A barbell plot stratified by sepsis admission diagnosis"}
+
+
+library(MIMICbook)
+apache_data$mort_var <- as.numeric(apache_data$actualhospitalmortality=="EXPIRED")
+apache_data$apache_level <- Hmisc::cut2(apache_data$apachescore,seq(0,200,20))
+
+plot_prop_by_level(apache_data %>% select(mort_var,apache_level,sepsis) %>% na.omit,factor.var1="apache_level",prop.var="mort_var",factor.var2="sepsis")
+
+```
+
+----
+
+Smoothed Plot with Rug
+
+```{r,fig.cap="A smoothed estimate of the mortality curve for APACHE-IV score stratified by sepsis admission diagnosis"}
+binomial_smooth <- function(...) {
+  geom_smooth(aes(group=sepsis,col=sepsis),method = "glm", method.args = list(family = "binomial"), ...,se=TRUE)
+}
+ggplot(apache_data,aes(apachescore,as.numeric(actualhospitalmortality=="EXPIRED",group=sepsis,col=sepsis))) + binomial_smooth() + geom_rug(aes(col=sepsis),alpha=0.1) + ylab("Estimated Probability of Death")
+
+```
+
+
+----
+
+- Each plot has its strength, but usually there's a plot which best communicates the data's story.
+- All plots are fairly low-tech.
+- EDA is not exclusively plots.
+
+
+----
+
+# Descriptive Summaries
+
+Numerous descriptive statistics are available, but some of the most relevant ones are:
+
+## 5/6 Number Summary
+
+```{r,echo=TRUE}
+tapply(apache_data$apachescore,
+       apache_data$actualhospitalmortality,
+       summary)
+```
+
+----
+
+## Contingency Tables
+
+```{r,echo=TRUE}
+table(apache_data$sepsis,
+      apache_data$actualhospitalmortality,
+      dnn=c("Sepsis","Hosp Mort"))
+
+```
+
+---- 
+
+Or their respective proportion table:
+
+```{r,echo=TRUE}
+prop.table(table(apache_data$sepsis
+                 ,apache_data$actualhospitalmortality,
+                 dnn=c("Sepsis","Hosp Mort")),1)
+
+
+```
+
+# Integrating into Confirmatory Analysis
+
+1. Do the conclusions of the analysis confirm what you see with your eyes?
+2. Is there a way to demonstrate the CDA's conclusions in one of my EDA plots?
+3. Later: does EDA done on the output of your CDA reveal anything interesting?
+
+
+
+# What tools are available?
+
+- Data visualization tools:
+    - In R:  base plot, ggplot2, lattice, shiny (for dashboards)
+    - Tableau: Commercial Software, used in industry, \$\$\$\$, dashboards
+    - Plotly: Commercial Software, with some open/free stuff.  Integrated with R and python.
+    - In Python: matlibplot, ggplot clone
+    - D3.js
+- Descriptive Statistics:
+    - In R: tableone, dplyr
+    - In python: tableone
+    - In SAS: PROC univariate
+    - Any stats package
+    - SQL
+
+# Conclusions
+
+- EDA is an essential part of data science.
+- Useful at most stages of a project.
+- Not meant to replace or be replaced by confirmatory or any other type of analysis.
+- EDA is often more convincing, less prone to error, and requires less assumptions than other forms of analysis.
+- Forces you to slow down a little: Cognitive Disfluency!
+- Remember: goal is trying to figure out what the data is saying -- probably what I enjoy most about my job!
+
+
+# Workshop
+
+- Distributed Over Slack (datset .csv file and .Rmd file)
+- Runs through a lot of the same ideas as the lecture.
+- Workshop uses base plot.  See the Rmd file of this presentation for examples of ggplot code.
+    - Can use either, base plot is probably easier for those new to R to learn; however ggplot is worth learning.
